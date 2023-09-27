@@ -8,18 +8,116 @@ import cv2
 import numpy as np
 import os
 import tifffile as tiff 
+from scipy.ndimage import gaussian_filter
+import concurrent.futures
 
 #THIS ALSO INCLUDES OPENCV CODE
+
 
 class NodeBase0(Node):
     version = 'v0.1'
     color = '#00a6ff' #yellow - Filtering 
 
-class NodeBase(Node):
+    # def handle_stack(self):
+    #     self.image_stack = self.input(0)[0]
+    #     self.frame = self.input(0)[1]
+    #     self.z_sclice = self.input(0)[2]
+    #     # squeeze = np.squeeze(self.image_stack)
+    #     if (self.image_stack.shape[0] != 1) & (self.image_stack.shape[1] != 1):
+    #         self.sliced = squeeze[self.frame, self.z_sclice, :, :]
+    #         self.frame_size = self.image_stack.shape[0]
+    #         self.z_size = self.image_stack.shape[1]
+    #     else:
+    #         self.sliced = squeeze
+    #     print(f"size frame {self.frame_size}, size z {self.z_size}")
+    #     print(f"shape {self.image_stack.shape}, frame {self.frame}, z {self.z_sclice}, SCLICE {squeeze.shape}")
+    def handle_stack(self):
+        self.image_stack = self.input(0)[0]
+        self.frame = self.input(0)[1] #dont actually need this anymore, but keep incase. Good to know wich time step
+        self.z_sclice = self.input(0)[2]
+        # self.squeeze = np.squeeze(self.image_stack)
+        self.z_size = self.image_stack.shape[0]
+        self.sliced = self.image_stack[self.z_sclice, :, :, :] #Z, H, W, C
+
+# class NodeBase(Node):
+#     version = 'v0.1'
+#     color = '#FFCA00' #yellow - Filtering 
+
+    
+#     def handle_stack(self):
+#         self.image_stack = self.input(0)[0]
+#         self.frame = self.input(0)[1]
+#         self.z_sclice = self.input(0)[2]
+#         self.squeeze = np.squeeze(self.image_stack)
+#         if (self.image_stack.shape[0] != 1) & (self.image_stack.shape[1] != 1):
+#             #only 1
+#             self.sliced = self.squeeze[self.frame, self.z_sclice, :, :]
+#             self.frame_size = self.image_stack.shape[0]
+#             self.z_size = self.image_stack.shape[1]
+#         else:
+#             self.sliced = self.squeeze
+#         print(f"size frame {self.frame_size}, size z {self.z_size}")
+#         print(f"shape {self.image_stack.shape}, frame {self.frame}, z {self.z_sclice}, SCLICE {self.squeeze.shape}")
+class NodePipeline(Node):
+    
+    def handle_stack(self):
+        self.image_stack = self.input(0)[0]
+        self.frame = self.input(0)[1] #dont actually need this anymore, but keep incase. Good to know wich time step
+        self.z_sclice = self.input(0)[2]
+        # self.squeeze = np.squeeze(self.image_stack)
+        self.z_size = self.image_stack.shape[0]
+        self.sliced = self.image_stack[self.z_sclice, :, :, :] #Z, H, W, C
+        #Debug
+        # print(f"size z {self.z_size}")
+        # print(f"shape colour {self.image_stack.shape[-1]}, frame {self.frame}, z {self.z_sclice}, SCLICE {self.squeeze.shape}")
+        # print(f"shape colour {self.sliced.shape[-1]}")
+
+    
+    def get_img(self, zslice):
+        #PROCESS SLICE 
+        #generate slice for dispay
+        reshaped = self.sliced.reshape(zslice.shape[:-1] + (-1,))
+        print(f"size shape {reshaped.shape}")
+    
+        # Apply median blur to all channels simultaneously
+        processed_data = self.proc_technique(reshaped)
+        
+        # Reshape the processed data back to the original shape
+        processed_slice = processed_data.reshape(zslice.shape)
+        
+        return processed_slice
+    
+    #signle time step
+    def proc_stack_parallel(self):
+        
+        # Define the number of worker threads or processes
+        num_workers = 6  # Adjust as needed
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            print(f"z size {self.z_size}")
+            for z in range(self.z_size):
+                    img = self.image_stack[z]
+                    print(f"\nprocessed z slice {z}")
+                    future = executor.submit(self.get_img,img)
+                    futures.append((z, future))
+
+            proc_data = np.empty_like(self.image_stack)
+
+            for z, future in futures:
+                processed_frame = future.result()
+                proc_data[z] = processed_frame
+        
+        # print(f"proc_data shape: {proc_data.shape}")
+        self.reshaped_proc_data = proc_data
+        # print(f"reshaped_proc_data shape: {self.reshaped_proc_data.shape}")
+        self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
+
+class NodeBase(NodePipeline):
     version = 'v0.1'
     color = '#FFCA00' #yellow - Filtering 
 
-class NodeBase3(Node):
+class NodeBase3(NodePipeline):
     version = 'v0.1'
     color = '#C55A11' #red - contrast enh 
 
@@ -27,9 +125,68 @@ class NodeBase2(Node):
     version = 'v0.1'
     color = '#92D050' #green - Binarization
 
-class NodeBase4(Node):
+    def handle_stack(self):
+        self.image_stack = self.input(0)[0]
+        self.frame = self.input(0)[1] #dont actually need this anymore, but keep incase. Good to know wich time step
+        self.z_sclice = self.input(0)[2]
+        # self.squeeze = np.squeeze(self.image_stack)
+        self.z_size = self.image_stack.shape[0]
+        self.sliced = self.image_stack[self.z_sclice, :, :, :] #Z, H, W, C
+        #Debug
+        print(f"size shape {self.sliced.shape}")
+        # print(f"shape colour {self.image_stack.shape[-1]}, frame {self.frame}, z {self.z_sclice}, SCLICE {self.squeeze.shape}")
+        print(f"shape colour {self.sliced.shape[-1]}")
+
+    
+    def get_img(self, zslice):
+        #PROCESS SLICE 
+        #generate slice for dispay
+        reshaped = self.sliced.reshape(zslice.shape[:-1] + (-1,))
+        print(f"size shape {reshaped.shape}")
+    
+        # Apply median blur to all channels simultaneously
+        processed_data = self.proc_technique(reshaped)
+        
+        # BINARIZE = now only one channel, therefore dont reshape
+
+        # Reshape the processed data back to the original shape
+        # processed_slice = processed_data.reshape(zslice.shape)
+        
+        return processed_data
+    
+    #signle time step
+    def proc_stack_parallel(self):
+        
+        # Define the number of worker threads or processes
+        num_workers = 6  # Adjust as needed
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            print(f"z size {self.z_size}")
+            for z in range(self.z_size):
+                    img = self.image_stack[z]
+                    print(f"\nprocessed z slice {z}")
+                    future = executor.submit(self.get_img,img)
+                    futures.append((z, future))
+            
+            # Create proc_data from processed_frame (not sclice - this may be grayscale)
+            proc_data = np.empty((self.image_stack.shape[0], self.image_stack.shape[1], self.image_stack.shape[2], 1), dtype=np.uint8)
+
+            for z, future in futures:
+                processed_frame = future.result()
+                processed_frame = np.expand_dims(processed_frame, axis=-1)  #Binaraization have to reshape to add a channel for standarzation
+                proc_data[z] = processed_frame
+        
+        # print(f"proc_data shape: {proc_data.shape}")
+        self.reshaped_proc_data = proc_data
+        print(f"reshaped_proc_data shape: {self.reshaped_proc_data.shape}")
+        print(f"data : {self.reshaped_proc_data.dtype}")
+        self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
+
+class NodeBase4(NodePipeline):
     version = 'v0.1'
     color = '#8064A2' #purple - post binarization
+
 
 
 class DualNodeBase(NodeBase):
@@ -882,6 +1039,8 @@ class OpenCVNodeBase(NodeBase0):
             pass
 
     def update_event(self, inp=-1):                                         #reset
+        #extract from stack
+        self.handle_stack()
         new_img_wrp = CVImage(self.get_img())
 
         if self.session.gui:
@@ -889,6 +1048,7 @@ class OpenCVNodeBase(NodeBase0):
 
         self.set_output_val(0, new_img_wrp)
 
+    
     def get_img(self):
         return None
 
@@ -1720,7 +1880,459 @@ class Slider_Gaus_Tick_v8(NodeBase):        #Nodebase just a different colour
                 )
     
 # NODES ------------------------------------------------------------------------------------------------------------------
+# ReadImage Original ///////////////
 
+# class ReadImage(NodeBase0):
+#     """Reads an image from a file"""
+
+#     title = 'Read Image'
+#     input_widget_classes = {
+#         'choose file IW': widgets.ChooseFileInputWidget
+#     }
+#     init_inputs = [
+#         NodeInputBP('f_path', add_data={'widget name': 'choose file IW', 'widget pos': 'besides'})
+#     ]
+#     init_outputs = [
+#         NodeOutputBP('img')
+#     ]
+#     main_widget_class = widgets.ChooseFileInputWidgetBASE3
+#     main_widget_pos = 'below ports'
+
+#     def __init__(self, params):
+#         super().__init__(params)
+
+#         if self.session.gui:
+#             from qtpy.QtCore import QObject, Signal
+#             class Signals(QObject):
+#                 new_img = Signal(object)
+#                 image_shape = Signal(list)
+#                 #reset sliders
+#                 reset_widget = Signal(int)
+#                 #remove widgets
+#                 remove_widget = Signal()
+
+#             # to send images to main_widget in gui mode
+#             self.SIGNALS = Signals()
+
+#         self.image_filepath = ''
+#         self.ttval = 0
+#         self.zzval = 0
+
+#     def view_place_event(self):
+#         self.input_widget(0).path_chosen.connect(self.path_chosen)
+#         self.SIGNALS.new_img.connect(self.main_widget().show_image)
+#         self.SIGNALS.image_shape.connect(self.main_widget().update_widgets)
+#         self.SIGNALS.reset_widget.connect(self.main_widget().reset_widg)
+#         self.SIGNALS.remove_widget.connect(self.main_widget().remove_widgets)
+#         self.main_widget().ValueChanged1.connect(self.onValue1Changed)
+#         self.main_widget().ValueChanged2.connect(self.onValue2Changed) 
+#         # try:
+#         #     self.SIGNALS.new_img.emit(self.get_img())
+#         # except:  # there might not be an image ready yet
+#         #     pass
+#         # self.main_widget_message.connect(self.main_widget().show_path)
+
+#     def update_event(self, inp=-1):   #called when the input is changed
+#         #therefore new image 
+#         self.ttval = 0
+#         self.zzval = 0
+#         self.SIGNALS.reset_widget.emit(1)
+#         # self.SIGNALS.remove_widget.emit()
+
+#         if self.image_filepath == '':
+#             return
+#         # Check if the file has a .tiff extension   --> tif file capability Check tiff 
+#         if self.image_filepath.endswith('.tif'):
+#             try:
+#                 self.image_data = tiff.imread(self.image_filepath)
+#                 #generate dimension list (dimension, slices, frames (time), width, height, channels)
+#                 self.id_tiff_dim(self.image_filepath)
+#                 # print(self.image_data)
+                
+#                 #4D images 
+#                 if self.dimension[0] == 5: #time and space (4D)
+#                     self.image_data = ((self.image_data/self.image_data.max())*65535).astype('uint16')
+#                     new_img_wrp = CVImage(self.get_img())
+#                     # print("shape", new_img_wrp.shape)
+#                     if self.session.gui:
+#                         self.SIGNALS.new_img.emit(new_img_wrp.img)
+
+#                     self.set_output_val(0, new_img_wrp)
+                    
+#                     print("Image loaded successfully")
+#                 #3D images - zstack only
+#                 #2D images
+#                 #dimension[0]==0
+#                 else:
+#                     image2D = CVImage(cv2.imread(self.image_filepath, cv2.IMREAD_UNCHANGED))
+#                     if self.session.gui:
+#                         self.SIGNALS.new_img.emit(image2D.img)
+#                     self.set_output_val(0,image2D)
+            
+#             except Exception as e:
+#                 print(e)
+#                 print("failed")
+
+#         else: 
+#             try:
+#                 self.set_output_val(0, CVImage(cv2.imread(self.image_filepath, cv2.IMREAD_UNCHANGED)))
+#             except Exception as e:
+#                 print(e)
+
+#     def id_tiff_dim(self,f_path):
+#         tif_file = tiff.TiffFile(f_path)
+
+#         # Check for TIFF metadata tags
+#         metadata = tif_file.pages[0].tags
+#         if metadata:
+#             # print("Metadata Tags:")
+#             for tag_name, tag in metadata.items():
+#                 print(f"{tag_name}: {tag.value}")
+
+#             #set dimension to 0 when a new tiff file is processed
+#             dimension = [0,1,1,0,0,0] #dim, slices , time
+            
+#             if 256 in metadata: #width
+#                             # Access the tag value directly
+#                             dimension[3] = metadata[256].value
+            
+                
+#             if 257 in metadata: #height
+#                             # Access the tag value directly
+#                             dimension[4] = metadata[257].value
+            
+#             if 277 in metadata: #channels
+#                             # Access the tag value directly
+#                             dimension[5] = int(metadata[277].value)
+#             if 259 in metadata:  # Tag for slices
+#                 dimension[1] = metadata[259].value
+
+#             if 262 in metadata:  # Tag for frames
+#                 frames = metadata[262].value
+            
+#             if 'ImageDescription' in metadata:
+#                     # Access 'ImageDescription' tag
+#                     image_description = metadata['ImageDescription']
+            
+#                     # Split the 'ImageDescription' string into lines
+#                     description_lines = image_description.value.split('\n')
+#                     # Parse the lines to extract slices and frames information
+#                     for line in description_lines:
+#                         if line.startswith("slices="):
+#                             dimension[1] = int(line.split('=')[1]) #slices
+#                             dimension[0] = 3
+#                         if line.startswith("frames="):
+#                             dimension[2] = int(line.split('=')[1]) #frames
+#                             dimension[0] += 2
+#                         if 256 in metadata: #width
+#                             # Access the tag value directly
+#                             dimension[3] = metadata[256].value
+#                         if 257 in metadata: #H
+#                             # Access the tag value directly
+#                             dimension[4] = metadata[257].value
+#                         if 277 in metadata: #channels
+#                             # Access the tag value directly
+#                             dimension[5] = metadata[277].value
+#         else:
+#                 print("ImageDescription tag not found in metadata.")
+                        
+#         print(f"Slices: {dimension[1]}")
+#         print(f"Frames: {dimension[2]}")
+#         print(f'Dimension: {dimension[0]}')
+#         print(f'Width: {dimension[3]}')
+#         print(f'Height: {dimension[4]}')
+#         print(f'Channels: {dimension[5]}')
+#         self.dimension=dimension
+#         self.SIGNALS.image_shape.emit(dimension)
+
+
+#     def get_state(self):
+#         data = {'image file path': self.image_filepath}
+#         return data
+
+#     def set_state(self, data, version):
+#         self.path_chosen(data['image file path'])
+#         # self.image_filepath = data['image file path']
+
+#     # def get_state(self) -> dict:
+#     #     return {
+#     #         # 'image file path': self.image_filepath,
+#     #         'val1': self.ttval, 
+#     #         'val2': self.zzval,
+#     #     }
+
+#     # def set_state(self, data: dict, version):
+#     #     # self.path_chosen(data['image file path'])
+#     #     self.ttval = data['val1']
+#     #     self.zzval = data['val2']
+
+#     def path_chosen(self, file_path):
+#         self.image_filepath = file_path
+#         self.update()
+    
+#     def onValue1Changed(self, value):
+#         print(f"timevalue{value}")
+#         self.ttval=value-1 #slider: 1-max for biologists
+#         self.new_img_wrp = CVImage(self.get_img())
+        
+#         if self.session.gui:
+#             #update continuously 
+#             self.SIGNALS.new_img.emit(self.new_img_wrp.img)   
+
+#         self.set_output_val(0, self.new_img_wrp)
+    
+#     def onValue2Changed(self, value):
+#         print(f"zvalue{value}")
+#         self.zzval=value-1
+#         self.new_img_wrp = CVImage(self.get_img())
+        
+#         if self.session.gui:
+#                 #update continuously 
+#             self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+      
+#         self.set_output_val(0, self.new_img_wrp)
+
+#     def get_img(self):
+#         return self.image_data[self.ttval,self.zzval,:,:]
+
+# ////////////////////////////////// Orginal above
+
+#tuple implementation 
+#all timesteps
+class ReadImage0(NodeBase0):
+    """Reads an image from a file"""
+
+    title = 'Read Image'
+    input_widget_classes = {
+        'choose file IW': widgets.ChooseFileInputWidget
+    }
+    init_inputs = [
+        NodeInputBP('f_path', add_data={'widget name': 'choose file IW', 'widget pos': 'besides'})
+    ]
+    init_outputs = [
+        NodeOutputBP('img')
+    ]
+    main_widget_class = widgets.ChooseFileInputWidgetBASE3
+    main_widget_pos = 'below ports'
+
+    def __init__(self, params):
+        super().__init__(params)
+
+        if self.session.gui:
+            from qtpy.QtCore import QObject, Signal
+            class Signals(QObject):
+                new_img = Signal(object)
+                image_shape = Signal(list)
+                #reset sliders
+                reset_widget = Signal(int)
+                #remove widgets
+                remove_widget = Signal()
+
+            # to send images to main_widget in gui mode
+            self.SIGNALS = Signals()
+
+        self.image_filepath = ''
+        self.ttval = 0
+        self.zzval = 0
+
+    def view_place_event(self):
+        self.input_widget(0).path_chosen.connect(self.path_chosen)
+        self.SIGNALS.new_img.connect(self.main_widget().show_image)
+        self.SIGNALS.image_shape.connect(self.main_widget().update_widgets)
+        self.SIGNALS.reset_widget.connect(self.main_widget().reset_widg)
+        self.SIGNALS.remove_widget.connect(self.main_widget().remove_widgets)
+        self.main_widget().ValueChanged1.connect(self.onValue1Changed)
+        self.main_widget().ValueChanged2.connect(self.onValue2Changed) 
+        self.main_widget().released1.connect(self.output_data1)  
+        self.main_widget().released2.connect(self.output_data1) 
+        # try:
+        #     self.SIGNALS.new_img.emit(self.get_img())
+        # except:  # there might not be an image ready yet
+        #     pass
+        # self.main_widget_message.connect(self.main_widget().show_path)
+
+    def update_event(self, inp=-1):   #called when the input is changed
+        #therefore new image 
+        self.ttval = 1
+        self.zzval = 1
+        self.SIGNALS.reset_widget.emit(1)
+        # self.SIGNALS.remove_widget.emit()
+
+        if self.image_filepath == '':
+            return
+        # Check if the file has a .tiff extension   --> tif file capability Check tiff 
+        if self.image_filepath.endswith('.tif'): #----------------------------------------------------------------------------------TIFF
+            try:
+                self.image_data = tiff.imread(self.image_filepath)
+                # Normalize - generate dimension list (T,Z,H,W,C)
+                self.dim = self.id_tiff_dim(self.image_filepath)
+                # Reshape - STANDARDIZED 
+                self.reshaped_data = self.image_data.reshape(self.dim)
+                print(f"reshaped: {self.reshaped_data.shape}")
+                # Grayscale
+                if self.reshaped_data.shape[4] == 1: #self.dim[4]==1:
+                    self.reshaped_data = ((self.reshaped_data/self.reshaped_data.max())*255).astype('uint8')
+                    print("NORMALIZED FOR GRAYSCALE")
+                
+                # Display image
+                # 3D, 3D or 5D
+                if (self.reshaped_data.shape[0] != 1) | (self.reshaped_data.shape[1] != 1): #time and space (4D)
+                    #squeeze standardized down to relevant dimension (remove 1s)
+                    self.squeezed = np.squeeze(self.reshaped_data)
+                    #slice
+                    new_img_wrp = CVImage(self.get_img())  
+                    # print("shape", new_img_wrp.shape)
+                    if self.session.gui:
+                        self.SIGNALS.new_img.emit(new_img_wrp.img)
+                    # if multiple time steps, output 
+                    self.set_output_val(0, (self.reshaped_data, self.ttval, self.zzval))
+
+                #2D images (tiff)
+                else:
+                    image2D = cv2.imread(self.image_filepath, cv2.IMREAD_UNCHANGED)
+                    self.reshaped_data = image2D.reshape(1, 1, *image2D.shape)
+                    if self.session.gui:
+                        new_img_wrp = CVImage(image2D)
+                        self.SIGNALS.new_img.emit(new_img_wrp.img)
+                    self.set_output_val(0,(self.reshaped_data, 1, 1))
+            
+            except Exception as e:
+                print(e)
+                print("failed")
+
+        else: #-------------------------------------------------------------------------------------------------------------------- Not TIFF
+            # 2D not tiff
+            try:
+                image2D = cv2.imread(self.image_filepath, cv2.IMREAD_UNCHANGED)
+                self.reshaped_data = image2D.reshape(1, 1, *image2D.shape)
+                if self.session.gui:
+                    new_img_wrp = CVImage(image2D)
+                    self.SIGNALS.new_img.emit(new_img_wrp.img)
+                self.set_output_val(0,(self.reshaped_data, 1, 1))
+            except Exception as e:
+                print(e)
+
+    def id_tiff_dim(self,f_path):
+        tif_file = tiff.TiffFile(f_path)
+        # Check for TIFF metadata tags
+        metadata = tif_file.pages[0].tags
+        if metadata:
+            # print("Metadata Tags:")
+            for tag_name, tag in metadata.items():
+                print(f"{tag_name}: {tag.value}")
+
+            #set dimension to 0 when a new tiff file is processed
+            dimension = [1,1,1,1,1] #dim, slices , time
+            
+            
+            #  T Z Y X C  (F, Z, H, W, C)
+            #  0 1 2 3 4
+            
+            if 256 in metadata: #width
+                            # Access the tag value directly
+                            dimension[3] = metadata[256].value
+            if 257 in metadata: #H
+                            # Access the tag value directly
+                            dimension[2] = metadata[257].value
+            if 277 in metadata: #channels
+                            # Access the tag value directly
+                            dimension[4] = metadata[277].value
+            if 259 in metadata:  # Tag for slices
+                            print("meta",metadata[259].value)
+                            dimension[1] = metadata[259].value
+                        
+            if 'ImageDescription' in metadata:
+                    # Access 'ImageDescription' tag
+                    image_description = metadata['ImageDescription']
+            
+                    # Split the 'ImageDescription' string into lines
+                    description_lines = image_description.value.split('\n')
+                    # Parse the lines to extract slices and frames information
+                    for line in description_lines:
+                        # if 262 in metadata:  # Tag for frames
+                        #     dimension[4] = metadata[262].value
+                        #     print("dim",dimension[4])
+                        if line.startswith("slices="):
+                            dimension[1] = int(line.split('=')[1]) #slice
+                        if line.startswith("frames="):
+                            dimension[0] = int(line.split('=')[1]) #frames
+                            print("frames", int(line.split('=')[1]))
+                            print("dim",dimension[4])
+                        
+        else:
+                print("ImageDescription tag not found in metadata.")
+                        
+        print(f'Width: {dimension[3]}')
+        print(f'Height: {dimension[2]}')
+        print(f'Channels: {dimension[4]}')
+        print(f"Slices: {dimension[1]}")
+        print(f"Frames: {dimension[0]}")
+        # print(f'Dimension: {dimension[0]}')
+        # self.dimension=dimension
+        self.SIGNALS.image_shape.emit(dimension)
+        return dimension
+
+    def get_state(self):
+        data = {'image file path': self.image_filepath}
+        return data
+
+    def set_state(self, data, version):
+        self.path_chosen(data['image file path'])
+        # self.image_filepath = data['image file path']
+
+    # def get_state(self) -> dict:
+    #     return {
+    #         # 'image file path': self.image_filepath,
+    #         'val1': self.ttval, 
+    #         'val2': self.zzval,
+    #     }
+
+    # def set_state(self, data: dict, version):
+    #     # self.path_chosen(data['image file path'])
+    #     self.ttval = data['val1']
+    #     self.zzval = data['val2']
+
+    def path_chosen(self, file_path):
+        self.image_filepath = file_path
+        self.update()
+    
+    def onValue1Changed(self, value):
+        print(f"timevalue{value}")
+        self.ttval=value-1 #slider: 1-max for biologists
+        self.new_img_wrp = CVImage(self.get_img())
+        
+        if self.session.gui:
+            #update continuously 
+            self.SIGNALS.new_img.emit(self.new_img_wrp.img)   
+    
+    def onValue2Changed(self, value):
+        print(f"zvalue{value}")
+        self.zzval=value-1
+        self.new_img_wrp = CVImage(self.get_img())
+        
+        if self.session.gui:
+                #update continuously 
+            self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+    
+    def output_data1(self, value):
+        self.set_output_val(0, (self.reshaped_data, self.ttval, self.zzval))
+    
+    def output_data2(self, value):
+        self.set_output_val(0, (self.reshaped_data, self.ttval, self.zzval))
+
+    def get_img(self):
+        # 4D
+        if (self.dim[0] != 1) & (self.dim[1] != 1):
+            return self.squeezed[self.ttval,self.zzval,:,:]
+        # 2D in time
+        elif self.dim[0] != 1:
+            return self.squeezed[self.ttval,1,:,:]  #wont have all these *** (SQUEEZED) 
+        # 3D (Z-stack)
+        elif self.dim[1] != 1:
+            return self.squeezed[1,self.zzval,:,:]
+
+#Single timestep
+# new shape (10, 512, 512, 1)
 class ReadImage(NodeBase0):
     """Reads an image from a file"""
 
@@ -1765,6 +2377,8 @@ class ReadImage(NodeBase0):
         self.SIGNALS.remove_widget.connect(self.main_widget().remove_widgets)
         self.main_widget().ValueChanged1.connect(self.onValue1Changed)
         self.main_widget().ValueChanged2.connect(self.onValue2Changed) 
+        self.main_widget().released1.connect(self.output_data)  
+        self.main_widget().released2.connect(self.output_data) 
         # try:
         #     self.SIGNALS.new_img.emit(self.get_img())
         # except:  # there might not be an image ready yet
@@ -1781,46 +2395,63 @@ class ReadImage(NodeBase0):
         if self.image_filepath == '':
             return
         # Check if the file has a .tiff extension   --> tif file capability Check tiff 
-        if self.image_filepath.endswith('.tif'):
+        if self.image_filepath.endswith('.tif'): #----------------------------------------------------------------------------------TIFF
             try:
                 self.image_data = tiff.imread(self.image_filepath)
-                #generate dimension list (dimension, slices, frames (time), width, height, channels)
-                self.id_tiff_dim(self.image_filepath)
-                # print(self.image_data)
+                # Normalize - generate dimension list (T,Z,H,W,C)
+                self.dim = self.id_tiff_dim(self.image_filepath)
+                # Reshape - STANDARDIZED 
+                self.reshaped_data = self.image_data.reshape(self.dim)
+                print(f"reshaped: {self.reshaped_data.shape}")
+                # self.handle_stack()
+                # Grayscale
+                if self.reshaped_data.shape[4] == 1: #self.dim[4]==1:
+                    self.reshaped_data = ((self.reshaped_data/self.reshaped_data.max())*255).astype('uint8')
+                    print("NORMALIZED FOR GRAYSCALE")
                 
-                #4D images 
-                if self.dimension[0] == 5: #time and space (4D)
-                    self.image_data = ((self.image_data/self.image_data.max())*65535).astype('uint16')
-                    new_img_wrp = CVImage(self.get_img())
+                # Display image
+                # 3D, 3D or 5D
+                # if (self.reshaped_data.shape[0] != 1) | (self.reshaped_data.shape[1] != 1): #time and space (4D)
+                    #squeeze standardized down to relevant dimension (remove 1s)
+                    # self.squeezed = np.squeeze(self.reshaped_data)
+                    #slice
+                new_img_wrp = CVImage(self.get_img())  
                     # print("shape", new_img_wrp.shape)
-                    if self.session.gui:
+                if self.session.gui:
                         self.SIGNALS.new_img.emit(new_img_wrp.img)
+                    # mulitple time steps
+                # if self.reshaped_data.shape[0] != 1:
+                self.set_output_val(0, (self.reshaped_data[self.ttval, :, :, :, :], self.ttval, self.zzval))
+                # else:
+                #     self.set_output_val(0, (self.reshaped_data[0, :, :, :, :], self.ttval, self.zzval))
 
-                    self.set_output_val(0, new_img_wrp)
-                    
-                    print("Image loaded successfully")
-                #3D images - zstack only
-                #2D images
-                #dimension[0]==0
-                else:
-                    image2D = CVImage(cv2.imread(self.image_filepath, cv2.IMREAD_UNCHANGED))
-                    if self.session.gui:
-                        self.SIGNALS.new_img.emit(image2D.img)
-                    self.set_output_val(0,image2D)
+                #2D images (tiff)
+                # else:
+                #     image2D = cv2.imread(self.image_filepath, cv2.IMREAD_UNCHANGED)
+                #     self.reshaped_data = image2D.reshape(1, 1, *image2D.shape)
+                #     if self.session.gui:
+                #         new_img_wrp = CVImage(image2D)
+                #         self.SIGNALS.new_img.emit(new_img_wrp.img)
+                #     self.set_output_val(0, (self.reshaped_data[0, :, :, :, :], 0, 0)) # will be 0 and 0 
             
             except Exception as e:
                 print(e)
                 print("failed")
 
-        else: 
+        else: #-------------------------------------------------------------------------------------------------------------------- Not TIFF
+            # 2D not tiff
             try:
-                self.set_output_val(0, CVImage(cv2.imread(self.image_filepath, cv2.IMREAD_UNCHANGED)))
+                image2D = cv2.imread(self.image_filepath, cv2.IMREAD_UNCHANGED)
+                self.reshaped_data = image2D.reshape(1, 1, *image2D.shape)
+                if self.session.gui:
+                    new_img_wrp = CVImage(image2D)
+                    self.SIGNALS.new_img.emit(new_img_wrp.img)
+                self.set_output_val(0,(self.reshaped_data, 0, 0))
             except Exception as e:
                 print(e)
 
     def id_tiff_dim(self,f_path):
         tif_file = tiff.TiffFile(f_path)
-
         # Check for TIFF metadata tags
         metadata = tif_file.pages[0].tags
         if metadata:
@@ -1829,26 +2460,25 @@ class ReadImage(NodeBase0):
                 print(f"{tag_name}: {tag.value}")
 
             #set dimension to 0 when a new tiff file is processed
-            dimension = [0,1,1,0,0,0] #dim, slices , time
+            dimension = [1,1,1,1,1] #dim, slices , time
+            
+            
+            #  T Z Y X C  (F, Z, H, W, C)
+            #  0 1 2 3 4
             
             if 256 in metadata: #width
                             # Access the tag value directly
                             dimension[3] = metadata[256].value
-            
-                
-            if 257 in metadata: #height
+            if 257 in metadata: #H
                             # Access the tag value directly
-                            dimension[4] = metadata[257].value
-            
+                            dimension[2] = metadata[257].value
             if 277 in metadata: #channels
                             # Access the tag value directly
-                            dimension[5] = int(metadata[277].value)
+                            dimension[4] = metadata[277].value
             if 259 in metadata:  # Tag for slices
-                dimension[1] = metadata[259].value
-
-            if 262 in metadata:  # Tag for frames
-                frames = metadata[262].value
-            
+                            print("meta",metadata[259].value)
+                            dimension[1] = metadata[259].value
+                        
             if 'ImageDescription' in metadata:
                     # Access 'ImageDescription' tag
                     image_description = metadata['ImageDescription']
@@ -1857,46 +2487,32 @@ class ReadImage(NodeBase0):
                     description_lines = image_description.value.split('\n')
                     # Parse the lines to extract slices and frames information
                     for line in description_lines:
+                        # if 262 in metadata:  # Tag for frames
+                        #     dimension[4] = metadata[262].value
+                        #     print("dim",dimension[4])
                         if line.startswith("slices="):
-                            dimension[1] = int(line.split('=')[1]) #slices
-                            dimension[0] = 3
+                            dimension[1] = int(line.split('=')[1]) #slice
                         if line.startswith("frames="):
-                            dimension[2] = int(line.split('=')[1]) #frames
-                            dimension[0] += 2
-                        if 256 in metadata: #width
-                            # Access the tag value directly
-                            dimension[3] = metadata[256].value
-                        if 257 in metadata: #H
-                            # Access the tag value directly
-                            dimension[4] = metadata[257].value
-                        if 277 in metadata: #channels
-                            # Access the tag value directly
-                            dimension[5] = metadata[277].value
+                            dimension[0] = int(line.split('=')[1]) #frames
+                            # print("frames", int(line.split('=')[1]))
+                            # print("dim",dimension[4])
+                        if line.startswith("channels="):
+                            dimension[4] = int(line.split('=')[1]) #frames
+                            # print("dim",dimension[4])
+                        
         else:
                 print("ImageDescription tag not found in metadata.")
                         
-        print(f"Slices: {dimension[1]}")
-        print(f"Frames: {dimension[2]}")
-        print(f'Dimension: {dimension[0]}')
         print(f'Width: {dimension[3]}')
-        print(f'Height: {dimension[4]}')
-        print(f'Channels: {dimension[5]}')
-        self.dimension=dimension
+        print(f'Height: {dimension[2]}')
+        print(f'Channels: {dimension[4]}')
+        print(f"Slices: {dimension[1]}")
+        print(f"Frames: {dimension[0]}")
+        # print(f'Dimension: {dimension[0]}')
+        # self.dimension=dimension
         self.SIGNALS.image_shape.emit(dimension)
-
-
-    def get_state(self):
-        data = {'image file path': self.image_filepath}
-        return data
-
-    def set_state(self, data, version):
-        self.path_chosen(data['image file path'])
-        # self.image_filepath = data['image file path']
-
-    def path_chosen(self, file_path):
-        self.image_filepath = file_path
-        self.update()
-    
+        return dimension
+        
     def onValue1Changed(self, value):
         print(f"timevalue{value}")
         self.ttval=value-1 #slider: 1-max for biologists
@@ -1905,8 +2521,6 @@ class ReadImage(NodeBase0):
         if self.session.gui:
             #update continuously 
             self.SIGNALS.new_img.emit(self.new_img_wrp.img)   
-
-        self.set_output_val(0, self.new_img_wrp)
     
     def onValue2Changed(self, value):
         print(f"zvalue{value}")
@@ -1916,13 +2530,61 @@ class ReadImage(NodeBase0):
         if self.session.gui:
                 #update continuously 
             self.SIGNALS.new_img.emit(self.new_img_wrp.img)
-      
-        self.set_output_val(0, self.new_img_wrp)
+    
+    def output_data(self, value):
+        if self.reshaped_data.shape[0] != 1:
+            self.set_output_val(0, (self.reshaped_data[self.ttval, :, :, :, :], self.ttval, self.zzval))
+        else:
+            self.set_output_val(0, (self.reshaped_data[0, :, :, :, :], self.ttval, self.zzval))
+
 
     def get_img(self):
-        return self.image_data[self.ttval,self.zzval,:,:]
+        # 4D
+        # if (self.dim[0] != 1) & (self.dim[1] != 1):
+        self.sliced = self.reshaped_data[self.ttval,self.zzval,:,:,:]
+        reshaped = self.sliced.reshape(self.sliced.shape[:-1] + (-1,))
+        print(f"THIS is the RESHAPE: {reshaped.shape}")
+        return reshaped
+        # 2D in time
+        # elif self.dim[0] != 1:
+        #     return self.reshaped_data[self.ttval,,:,:]  #wont have all these *** (SQUEEZED) 
+        # # 3D (Z-stack)
+        # elif self.dim[1] != 1:
+        #     return self.reshaped_data[1,self.zzval,:,:]
+    
+    # def get_state(self):
+    #     data = {'image file path': self.image_filepath}
+    #     return data
+    def get_state(self) -> dict:
+        data = {'image file path': self.image_filepath,
+                'dimension': self.dim
+                }
+        print(data)
+        return data
+        
 
+    def set_state(self, data: dict, version):
+        self.path_chosen(data['image file path'])
+        self.dim = data['dimension']
+        # self.id_tiff_dim(self.image_filepath)
+        # self.image_filepath = data['image file path']
 
+    def path_chosen(self, file_path):
+        self.image_filepath = file_path
+        self.update()
+
+    # def path_chosen(self, file_path):
+    #     self.image_filepath = file_path
+    #     self.update()
+    
+    # def get_state(self) -> dict:
+    #     return {
+    #         'file': self.image_filepath
+    #     }
+
+    # def set_state(self, data: dict, version):
+    #     self.image_filepath = data['file']
+    
 
 class ReadImageTiff(NodeBase0):
     """Reads an image from a file"""
@@ -1995,6 +2657,8 @@ class ReadImageTiff(NodeBase0):
         print(self.image_filepath)
         self.update()
 
+        
+
 class DisplayImg(OpenCVNodeBase):
     title = 'Display Image'
     init_inputs = [
@@ -2002,7 +2666,9 @@ class DisplayImg(OpenCVNodeBase):
     ]
 
     def get_img(self):
-        return self.input(0).img
+        return self.sliced #.img
+        # return self.input(0).img
+        
 
 # Filttering ------------------------------------------------------------------------------------------------------------------
 
@@ -2045,10 +2711,11 @@ class Blur_Averaging(NodeBase):        #Nodebase just a different colour
         self.SIGNALS.new_img.connect(self.main_widget().show_image)
         self.SIGNALS.clr_img.connect(self.main_widget().clear_img)
         self.main_widget().kValueChanged.connect(self.onSliderValueChanged)
+        self.main_widget().kValueChanged.connect(self.proc_stack_parallel)
         self.main_widget().previewState.connect(self.preview)
         
         try:
-             self.new_img_wrp = CVImage(self.get_img())
+             self.new_img_wrp = CVImage(self.get_img(self.sliced))
              self.SIGNALS.new_img.emit(self.new_img_wrp.img)
              self.set_output_val(0, self.new_img_wrp)
         except:  # there might not be an image ready yet
@@ -2059,12 +2726,16 @@ class Blur_Averaging(NodeBase):        #Nodebase just a different colour
 
     #called when img connected - send output
     def update_event(self, inp=-1):  #called when an input is changed
-        self.new_img_wrp = CVImage(self.get_img())
+        #extract slice
+        self.handle_stack()
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 self.SIGNALS.new_img.emit(self.new_img_wrp.img)
 
-        self.set_output_val(0, self.new_img_wrp)
+        self.proc_stack_parallel()
+      
+        self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
     
     def preview(self, state):
         if state ==  True:
@@ -2080,7 +2751,7 @@ class Blur_Averaging(NodeBase):        #Nodebase just a different colour
         # This method will be called whenever the widget's signal is emitted
         # print(value)
         self.kk = value
-        self.new_img_wrp = CVImage(self.get_img())
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 #update continuously 
@@ -2088,24 +2759,23 @@ class Blur_Averaging(NodeBase):        #Nodebase just a different colour
         else:
             self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
       
-        self.set_output_val(0, self.new_img_wrp)
     
-    def get_img(self):
+    def proc_technique(self,img):
         #debug
         # print(f"getimageValue{value}")
         return cv2.blur(
-            src=self.input(0).img,
+            src=img,
             ksize=(self.kk,self.kk),
                 )
-        
-    # #use when save and close
-    # def get_state(self) -> dict:
-    #     return {
-    #         'val': self.val,
-    #     }
+    
+    def get_state(self) -> dict:
+        return {
+            'val1': self.kk
+        }
 
-    # def set_state(self, data: dict, version):
-    #     self.val = data['val']
+    def set_state(self, data: dict, version):
+        self.kk = data['val1']
+    
 
 
 class Median_Blur(NodeBase):        #Nodebase just a different colour
@@ -2147,12 +2817,13 @@ class Median_Blur(NodeBase):        #Nodebase just a different colour
         self.SIGNALS.new_img.connect(self.main_widget().show_image)
         self.SIGNALS.clr_img.connect(self.main_widget().clear_img)
         self.main_widget().kValueChanged.connect(self.onSliderValueChanged)
+        self.main_widget().kValueChanged.connect(self.proc_stack_parallel)
         self.main_widget().previewState.connect(self.preview)
         
         try:
-             self.new_img_wrp = CVImage(self.get_img())
+             self.new_img_wrp = CVImage(self.get_img(self.sliced))
              self.SIGNALS.new_img.emit(self.new_img_wrp.img)
-             self.set_output_val(0, self.new_img_wrp)
+            #  self.set_output_val(0, (self.proc_stack(), self.frame, self.z_sclice))
         except:  # there might not be an image ready yet
             pass
         # when running in gui mode, the value might come from the input widget
@@ -2161,12 +2832,149 @@ class Median_Blur(NodeBase):        #Nodebase just a different colour
 
     #called when img connected - send output
     def update_event(self, inp=-1):  #called when an input is changed
+        #extract slice
+        self.handle_stack()
+        print(f"type {self.sliced.dtype}")
+        print(f"shape {self.sliced.shape}")
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
+        if self.prev == True:
+            if self.session.gui:
+                self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+                
+        self.proc_stack_parallel()
+      
+        self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
+    
+    def preview(self, state):
+        if state ==  True:
+            self.prev = True
+            #Bring image back immediately 
+            self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+               
+        else:
+              self.prev = False 
+              self.SIGNALS.clr_img.emit(self.new_img_wrp.img) 
+
+    def onSliderValueChanged(self, value):
+        # This method will be called whenever the widget's signal is emitted
+        # print(value)
+        # print(f"new shape {self.input(0)[0].shape}")
+        self.kk = value
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
+        if self.prev == True:
+            if self.session.gui:
+                #update continuously 
+                self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        else:
+            self.SIGNALS.clr_img.emit(self.new_img_wrp.img)        
+    
+    #get_img specific
+    def proc_technique(self,img):
+        print(f"median Blur, ksize {self.kk}\n")
+        return cv2.medianBlur(img, self.kk)
+        
+          # #use when save and close
+    def get_state(self) -> dict:
+        return {
+            'val1': self.kk,
+
+        }
+
+    def set_state(self, data: dict, version):
+        self.kk = data['val1']
+
+        #ALL time steps
+    # def proc_stack_parallel(self, value):
+    #     # Create an empty array to store the processed data
+    #     proc_data = np.empty_like(self.squeeze)
+
+    #     # Define the kernel size for median blur
+    #     ksize = value
+
+    #     # Define the number of worker threads or processes
+    #     num_workers = 8  # Adjust as needed
+
+    #     with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+    #         futures = []
+    #         for t in range(self.frame_size):
+    #             for z in range(self.z_size):
+    #                 img = self.squeeze[t, z, :, :]
+    #                 future = executor.submit(self.process_frame,img, ksize)
+    #                 futures.append((t, z, future))
+
+    #         for t, z, future in futures:
+    #             processed_image = future.result()
+    #             proc_data[t, z, :, :] = processed_image
+
+    #     print(f"proc_data shape {proc_data.shape}")
+    #     self.reshaped_proc_data = proc_data[..., np.newaxis]
+    #     print(f"reshaped_proc_data shape {self.reshaped_proc_data.shape}")
+    #     self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
+
+
+class Guassian_Blur3D1(NodeBase):        #Nodebase just a different colour
+          #Nodebase just a different colour
+    title = 'Guassian_Blur3D'
+    version = 'v0.1'
+    init_inputs = [
+        
+        NodeInputBP('input img'),
+         
+    ]
+    init_outputs = [
+        NodeOutputBP('output img'), #img
+
+    ]
+    main_widget_class = widgets.Gaus_Blur_MainWidget3D
+    main_widget_pos = 'below ports'
+
+    def __init__(self, params):
+        super().__init__(params)
+
+        if self.session.gui:
+            from qtpy.QtCore import QObject, Signal
+            class Signals(QObject):
+                #Signals used for preview
+                new_img = Signal(object)    #original
+                clr_img = Signal(object)    #added      
+        
+            # to send images to main_widget in gui mode
+            self.SIGNALS = Signals()
+
+        self.prev = True
+        self.kk = 5
+        # self.sigma = [5, 5, 5,]
+    def place_event(self):  
+        self.update()
+
+    def view_place_event(self):
+        self.SIGNALS.new_img.connect(self.main_widget().show_image)
+        self.SIGNALS.clr_img.connect(self.main_widget().clear_img)
+        self.main_widget().kValueChanged.connect(self.onSliderValueChanged)
+        self.main_widget().kReleased.connect(self.proc_stack_parallel)
+        self.main_widget().previewState.connect(self.preview)
+        
+        try:
+             self.new_img_wrp = CVImage(self.get_img())
+             self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+            #  self.set_output_val(0, (self.proc_stack(), self.frame, self.z_sclice))
+        except:  # there might not be an image ready yet
+            pass
+        # when running in gui mode, the value might come from the input widget
+        # check
+        self.update()
+
+    #called when img connected - send output
+    def update_event(self, inp=-1):  #called when an input is changed
+        #extract slice
+        self.handle_stack()
+        self.proc_stack_parallel()
+        print(f"type {self.sliced.dtype}")
+        print(f"shape {self.sliced.shape}")
         self.new_img_wrp = CVImage(self.get_img())
         if self.prev == True:
             if self.session.gui:
                 self.SIGNALS.new_img.emit(self.new_img_wrp.img)
-
-        self.set_output_val(0, self.new_img_wrp)
     
     def preview(self, state):
         if state ==  True:
@@ -2189,17 +2997,72 @@ class Median_Blur(NodeBase):        #Nodebase just a different colour
                 self.SIGNALS.new_img.emit(self.new_img_wrp.img)
         else:
             self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
-      
-        self.set_output_val(0, self.new_img_wrp)
+        #Only out put when slider released 
+        # self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
     
     def get_img(self):
         #debug
         # print(f"getimageValue{value}")
-        return cv2.medianBlur(
-            src=self.input(0).img,
-            ksize=self.kk,
-                )
+        # image_uint8 = ((self.sliced/self.sliced.max())*255).astype('uint8')
+        # convert to 8, display as 8, but keep stack as original
+        return self.proc[self.frame, self.z_sclice, :, :]
+    
+    def process_frame(self, img, sigma_z, sigma_x, sigma_y):
+        return gaussian_filter(img, sigma=(sigma_z, sigma_x, sigma_y))
+
+    def proc_stack_parallel(self, value):
+        # Create an empty array to store the processed data
+        proc_data = np.empty_like(self.squeeze)
+
+        # Define the parameters for Gaussian blur
+        sigma_z = value #make global, then call below # Assuming kk now represents sigma_z
+        sigma_x = 2.0 #value[0]
+        sigma_y = 2.0
+
+        # Define the number of worker threads or processes
+        num_workers = 8  # Adjust as needed
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            for t in range(self.frame_size):
+                img = self.squeeze[t, :, :, :]  # Get the 2D slice
+                future = executor.submit(self.process_frame, img, sigma_z, sigma_x, sigma_y)
+                futures.append((t, future))
+
+            for t, future in futures:
+                processed_image = future.result()
+                proc_data[t, :, :, :] = processed_image
+
+
+        print(f"proc_data shape {proc_data.shape}")
+        self.proc = proc_data
+        self.reshaped_proc_data = proc_data[..., np.newaxis]
+        print(f"reshaped_proc_data shape {self.reshaped_proc_data.shape}")
+
+        self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
+    
+    # def proc_stack(self):
+    #     proc_data = np.empty_like(self.squeeze)
+    #     #4D
+    #     sigma_x = 2.0
+    #     sigma_y = 2.0
+    #     # if (self.image_stack.shape[0] != 1) & (self.image_stack.shape[1] != 1):
+    #     for t in range(self.frame_size):
+    #             blurred_stack = gaussian_filter(self.squeeze[t, :, :, :], sigma=(self.kk, sigma_x, sigma_y))
+                
+    #             proc_data[t, :, :, :] = blurred_stack
+    #             # cv2.imshow(f"proced slice{z}", proc_data[2, z, :, :])
+    #     print(f"proc_data shape {proc_data.shape}")
+    #     #reshape
+    #     # Reshape 'proc_data' to add an extra dimension of size 1
+    #     self.proc = proc_data
+    #     self.reshaped_proc_data = proc_data[..., np.newaxis]
+    #     print(f"reshaped_proc_data shape {self.reshaped_proc_data.shape}")
+
+
+     
         
+	
     # #use when save and close
     # def get_state(self) -> dict:
     #     return {
@@ -2360,9 +3223,9 @@ class Gaussian_Blur(NodeBase):        #Nodebase just a different colour
 
         self.prev = True
         default = 5
-        self.kk = 0
-        self.xx = 0
-        self.yy = 0
+        self.kk = 1
+        self.xx = 1
+        self.yy = 1
         # self.kk = default
         # self.xx = default
         # self.yy = default
@@ -2377,11 +3240,15 @@ class Gaussian_Blur(NodeBase):        #Nodebase just a different colour
         self.main_widget().kValueChanged.connect(self.onkValueChanged)
         self.main_widget().XValueChanged.connect(self.onXvalueChanged)        
         self.main_widget().YValueChanged.connect(self.onYvalueChanged)
+
+        self.main_widget().kValueChanged.connect(self.proc_stack_parallel)
+        self.main_widget().XValueChanged.connect(self.proc_stack_parallel)        
+        self.main_widget().YValueChanged.connect(self.proc_stack_parallel)
         
         try:
-             self.new_img_wrp = CVImage(self.get_img())
+             self.new_img_wrp = CVImage(self.get_img(self.sliced))
              self.SIGNALS.new_img.emit(self.new_img_wrp.img)
-             self.set_output_val(0, self.new_img_wrp)
+            #  self.set_output_val(0, self.new_img_wrp)
         except:  # there might not be an image ready yet
             pass
         # when running in gui mode, the value might come from the input widget
@@ -2390,12 +3257,14 @@ class Gaussian_Blur(NodeBase):        #Nodebase just a different colour
 
     #called when img connected - send output
     def update_event(self, inp=-1):  #called when an input is changed
-        self.new_img_wrp = CVImage(self.get_img())
+        #extract slice
+        self.handle_stack()
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 self.SIGNALS.new_img.emit(self.new_img_wrp.img)
-
-        self.set_output_val(0, self.new_img_wrp)
+        self.proc_stack_parallel()
+        self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
     
     def preview(self, state):
         if state ==  True:
@@ -2411,35 +3280,31 @@ class Gaussian_Blur(NodeBase):        #Nodebase just a different colour
         # This method will be called whenever the widget's signal is emitted
         print(value)
         self.kk = value
-        self.new_img_wrp = CVImage(self.get_img())
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 #update continuously 
                 self.SIGNALS.new_img.emit(self.new_img_wrp.img)
         else:
             self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
-      
-        self.set_output_val(0, self.new_img_wrp)
+
 
     def onXvalueChanged(self, value):
         # This method will be called whenever the widget's signal is emitted
         self.xx = value
-        self.new_img_wrp = CVImage(self.get_img())
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 #update continuously 
                 self.SIGNALS.new_img.emit(self.new_img_wrp.img)
         else:
             self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
-      
-        self.set_output_val(0, self.new_img_wrp)
-        
     
     def onYvalueChanged(self, value):
         # This method will be called whenever the widget's signal is emitted
         self.yy = value
         # print(self.yy)
-        self.new_img_wrp = CVImage(self.get_img())
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 #update continuously 
@@ -2447,14 +3312,13 @@ class Gaussian_Blur(NodeBase):        #Nodebase just a different colour
         else:
             self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
       
-        self.set_output_val(0, self.new_img_wrp)
     
-    def get_img(self):
+    def proc_technique(self,img):
         # debug
-        print(self.xx)
-        print(self.yy)
+        # print(self.xx)
+        # print(self.yy)
         return cv2.GaussianBlur(
-            src=self.input(0).img,
+            src=img,
             ksize=(self.kk, self.kk),
             sigmaX=self.xx,
             sigmaY=self.yy,
@@ -2465,7 +3329,299 @@ class Gaussian_Blur(NodeBase):        #Nodebase just a different colour
         return {
             'ksize': self.kk,
             'sigmaX': self.xx,
-            'sigmaY': self.yy
+            'sigmaY': self.yy,
+
+        }
+
+    def set_state(self, data: dict, version):
+        self.kk = data['ksize']
+        self.xx = data['sigmaX']
+        self.yy = data['sigmaY']
+
+class Gaussian_Blur3D(NodeBase):        #Nodebase just a different colour
+          #Nodebase just a different colour
+    title = 'Gaussian Blur3D'
+    version = 'v0.1'
+    init_inputs = [
+        
+        NodeInputBP('input img'),
+         
+    ]
+    init_outputs = [
+        NodeOutputBP('output img'), #img
+
+    ]
+    main_widget_class = widgets.Gaus_Blur_MainWidget3D
+    main_widget_pos = 'below ports'
+
+    def __init__(self, params):
+        super().__init__(params)
+
+        if self.session.gui:
+            from qtpy.QtCore import QObject, Signal
+            class Signals(QObject):
+                #Signals used for preview
+                new_img = Signal(object)    #original
+                clr_img = Signal(object)    #added      
+        
+            # to send images to main_widget in gui mode
+            self.SIGNALS = Signals()
+
+        self.prev = True
+        default = 5
+        self.kk = 1
+        self.xx = 1
+        self.yy = 1
+        # self.kk = default
+        # self.xx = default
+        # self.yy = default
+
+    def place_event(self):  
+        self.update()
+
+    def view_place_event(self):
+        self.SIGNALS.new_img.connect(self.main_widget().show_image)
+        self.SIGNALS.clr_img.connect(self.main_widget().clear_img)
+        self.main_widget().previewState.connect(self.preview)
+        self.main_widget().kValueChanged.connect(self.onkValueChanged)
+        self.main_widget().XValueChanged.connect(self.onXvalueChanged)        
+        self.main_widget().YValueChanged.connect(self.onYvalueChanged)
+
+        self.main_widget().kValueChanged.connect(self.proc_stack_parallel)
+        self.main_widget().XValueChanged.connect(self.proc_stack_parallel)        
+        self.main_widget().YValueChanged.connect(self.proc_stack_parallel)
+        
+        try:
+             self.new_img_wrp = CVImage(self.get_img(self.sliced))
+             self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+            #  self.set_output_val(0, self.new_img_wrp)
+        except:  # there might not be an image ready yet
+            pass
+        # when running in gui mode, the value might come from the input widget
+        # check
+        self.update()
+
+    #called when img connected - send output
+    def update_event(self, inp=-1):  #called when an input is changed
+        #extract slice
+        self.handle_stack()
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
+        if self.prev == True:
+            if self.session.gui:
+                self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        self.proc_stack_parallel()
+        self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
+    
+    def preview(self, state):
+        if state ==  True:
+            self.prev = True
+            #Bring image back immediately 
+            self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+               
+        else:
+              self.prev = False 
+              self.SIGNALS.clr_img.emit(self.new_img_wrp.img) 
+
+    def onkValueChanged(self, value):
+        # This method will be called whenever the widget's signal is emitted
+        print(value)
+        self.kk = value
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
+        if self.prev == True:
+            if self.session.gui:
+                #update continuously 
+                self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        else:
+            self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
+
+
+    def onXvalueChanged(self, value):
+        # This method will be called whenever the widget's signal is emitted
+        self.xx = value
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
+        if self.prev == True:
+            if self.session.gui:
+                #update continuously 
+                self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        else:
+            self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
+    
+    def onYvalueChanged(self, value):
+        # This method will be called whenever the widget's signal is emitted
+        self.yy = value
+        # print(self.yy)
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
+        if self.prev == True:
+            if self.session.gui:
+                #update continuously 
+                self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        else:
+            self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
+      
+    
+    def proc_technique(self,img):
+        # debug
+        # print(self.xx)
+        # print(self.yy)
+        return gaussian_filter(img, sigma=(self.xx, self.yy, self.kk)) #sigma Z, Y, X
+            # src=img,
+            # ksize=(self.kk, self.kk),
+            # sigmaX=self.xx,
+            # sigmaY=self.yy,
+        
+    
+      # #use when save and close
+    def get_state(self) -> dict:
+        return {
+            # 'ksize': self.xx,
+            'sigmaX': self.xx,
+            # 'sigmaY': self.xx,
+
+        }
+
+    def set_state(self, data: dict, version):
+        self.kk = data['sigmaX']
+        self.xx = data['sigmaX']
+        self.yy = data['sigmaX']
+
+class Bilateral_Filtering(NodeBase):        #Nodebase just a different colour
+          #Nodebase just a different colour
+    title = 'Bilateral Filtering'
+    version = 'v0.1'
+    init_inputs = [
+        
+        NodeInputBP('input img'),
+         
+    ]
+    init_outputs = [
+        NodeOutputBP('output img'), #img
+
+    ]
+    main_widget_class = widgets.Bilateral_MainWidget
+    main_widget_pos = 'below ports'
+
+    def __init__(self, params):
+        super().__init__(params)
+
+        if self.session.gui:
+            from qtpy.QtCore import QObject, Signal
+            class Signals(QObject):
+                #Signals used for preview
+                new_img = Signal(object)    #original
+                clr_img = Signal(object)    #added      
+        
+            # to send images to main_widget in gui mode
+            self.SIGNALS = Signals()
+
+        self.prev = True
+        default = 5
+        self.kk = default
+        self.xx = default
+        self.yy = default
+        # self.kk = default
+        # self.xx = default
+        # self.yy = default
+
+    def place_event(self):  
+        self.update()
+
+    def view_place_event(self):
+        self.SIGNALS.new_img.connect(self.main_widget().show_image)
+        self.SIGNALS.clr_img.connect(self.main_widget().clear_img)
+        self.main_widget().previewState.connect(self.preview)
+        self.main_widget().kValueChanged.connect(self.onkValueChanged)
+        self.main_widget().XValueChanged.connect(self.onXvalueChanged)        
+        self.main_widget().YValueChanged.connect(self.onYvalueChanged)
+
+        self.main_widget().kValueChanged.connect(self.proc_stack_parallel)
+        self.main_widget().XValueChanged.connect(self.proc_stack_parallel)        
+        self.main_widget().YValueChanged.connect(self.proc_stack_parallel)
+        
+        try:
+             self.new_img_wrp = CVImage(self.get_img(self.sliced))
+             self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+            #  self.set_output_val(0, self.new_img_wrp)
+        except:  # there might not be an image ready yet
+            pass
+        # when running in gui mode, the value might come from the input widget
+        # check
+        self.update()
+
+    #called when img connected - send output
+    def update_event(self, inp=-1):  #called when an input is changed
+        #extract slice
+        self.handle_stack()
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
+        if self.prev == True:
+            if self.session.gui:
+                self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        self.proc_stack_parallel()
+        self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
+    
+    def preview(self, state):
+        if state ==  True:
+            self.prev = True
+            #Bring image back immediately 
+            self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+               
+        else:
+              self.prev = False 
+              self.SIGNALS.clr_img.emit(self.new_img_wrp.img) 
+
+    def onkValueChanged(self, value):
+        # This method will be called whenever the widget's signal is emitted
+        print(value)
+        self.kk = value
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
+        if self.prev == True:
+            if self.session.gui:
+                #update continuously 
+                self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        else:
+            self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
+
+
+    def onXvalueChanged(self, value):
+        # This method will be called whenever the widget's signal is emitted
+        self.xx = value
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
+        if self.prev == True:
+            if self.session.gui:
+                #update continuously 
+                self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        else:
+            self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
+    
+    def onYvalueChanged(self, value):
+        # This method will be called whenever the widget's signal is emitted
+        self.yy = value
+        # print(self.yy)
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
+        if self.prev == True:
+            if self.session.gui:
+                #update continuously 
+                self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        else:
+            self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
+      
+    
+    def proc_technique(self,img):
+        # debug
+        # print(self.xx)
+        # print(self.yy)
+        return cv2.bilateralFilter(
+            src=img,
+            d=self.kk,
+            sigmaColor=self.xx,
+            sigmaSpace=self.yy,
+        )
+    
+      # #use when save and close
+    def get_state(self) -> dict:
+        return {
+            'ksize': self.kk,
+            'sigmaX': self.xx,
+            'sigmaY': self.yy,
 
         }
 
@@ -2475,7 +3631,7 @@ class Gaussian_Blur(NodeBase):        #Nodebase just a different colour
         self.yy = data['sigmaY']
     
     
-class Bilateral_Filtering(NodeBase):        #Nodebase just a different colour
+class Bilateral_Filtering1(NodeBase):        #Nodebase just a different colour
           #Nodebase just a different colour
     title = 'Bilateral Filtering'
     version = 'v0.1'
@@ -2613,7 +3769,7 @@ class Bilateral_Filtering(NodeBase):        #Nodebase just a different colour
 #/////// Errosion, Dilation 
 
 class Dilation(NodeBase):        #Nodebase just a different colour
-    title = 'dilate'
+    title = 'Dilate'
     version = 'v0.1'
     init_inputs = [
         
@@ -2654,10 +3810,12 @@ class Dilation(NodeBase):        #Nodebase just a different colour
         self.SIGNALS.clr_img.connect(self.main_widget().clear_img)
         self.main_widget().previewState.connect(self.preview)
         self.main_widget().Value1Changed.connect(self.ValueChanged1)
+        self.main_widget().Value1Changed.connect(self.proc_stack_parallel)
         self.main_widget().Value2Changed.connect(self.ValueChanged2)
+        self.main_widget().Value2Changed.connect(self.proc_stack_parallel)
         
         try:
-             self.new_img_wrp = CVImage(self.get_img())
+             self.new_img_wrp = CVImage(self.get_img(self.sliced))
              self.SIGNALS.new_img.emit(self.new_img_wrp.img)
              self.set_output_val(0, self.new_img_wrp)
         except:  # there might not be an image ready yet
@@ -2668,12 +3826,13 @@ class Dilation(NodeBase):        #Nodebase just a different colour
 
     #called when img connected - send output
     def update_event(self, inp=-1):  #called when an input is changed
-        self.new_img_wrp = CVImage(self.get_img())
+        self.handle_stack()
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 self.SIGNALS.new_img.emit(self.new_img_wrp.img)
-
-        self.set_output_val(0, self.new_img_wrp)
+        self.proc_stack_parallel()
+        self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
     
     def preview(self, state):
         if state ==  True:
@@ -2689,7 +3848,7 @@ class Dilation(NodeBase):        #Nodebase just a different colour
         # This method will be called whenever the widget's signal is emitted
         # print(value)
         self.value_1 = value
-        self.new_img_wrp = CVImage(self.get_img())
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 #update continuously 
@@ -2697,13 +3856,12 @@ class Dilation(NodeBase):        #Nodebase just a different colour
         else:
             self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
       
-        self.set_output_val(0, self.new_img_wrp)
 
     def ValueChanged2(self, value):
         # This method will be called whenever the widget's signal is emitted
         # print(value)
         self.value_2 = value
-        self.new_img_wrp = CVImage(self.get_img())
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 #update continuously 
@@ -2711,15 +3869,23 @@ class Dilation(NodeBase):        #Nodebase just a different colour
         else:
             self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
       
-        self.set_output_val(0, self.new_img_wrp)
 
-    def get_img(self):
+    def proc_technique(self,img):
         return cv2.dilate(
-            src=self.input(0).img,
+            src=img,
             kernel=np.ones((self.value_1,self.value_1),np.uint8),
             iterations=self.value_2 
         )
+    
+    def get_state(self) -> dict:
+        return {
+            'val1': self.value_1,
+            'val2': self.value_2,
+        }
 
+    def set_state(self, data: dict, version):
+        self.value_1 = data['val1']
+        self.value_2 = data['val2']
 #//////////////////////////////
 # Morphological Transformations
 
@@ -2765,9 +3931,10 @@ class Morphological_Base(NodeBase):        #Nodebase just a different colour
         self.SIGNALS.clr_img.connect(self.main_widget().clear_img)
         self.main_widget().previewState.connect(self.preview)
         self.main_widget().Value1Changed.connect(self.ValueChanged)
+        self.main_widget().Value1Changed.connect(self.proc_stack_parallel)
         
         try:
-             self.new_img_wrp = CVImage(self.get_img())
+             self.new_img_wrp = CVImage(self.get_img(self.sliced))
              self.SIGNALS.new_img.emit(self.new_img_wrp.img)
              self.set_output_val(0, self.new_img_wrp)
         except:  # there might not be an image ready yet
@@ -2778,12 +3945,15 @@ class Morphological_Base(NodeBase):        #Nodebase just a different colour
 
     #called when img connected - send output
     def update_event(self, inp=-1):  #called when an input is changed
-        self.new_img_wrp = CVImage(self.get_img())
+        self.handle_stack()
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        
+        self.proc_stack_parallel()
 
-        self.set_output_val(0, self.new_img_wrp)
+        self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
     
     def preview(self, state):
         if state ==  True:
@@ -2799,7 +3969,7 @@ class Morphological_Base(NodeBase):        #Nodebase just a different colour
         # This method will be called whenever the widget's signal is emitted
         # print(value)
         self.value_1 = value
-        self.new_img_wrp = CVImage(self.get_img())
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 #update continuously 
@@ -2809,16 +3979,25 @@ class Morphological_Base(NodeBase):        #Nodebase just a different colour
       
         self.set_output_val(0, self.new_img_wrp)
 
-    def get_img(self):
+    def proc_technique(self,img):
         return cv2.morphologyEx(
-            src=self.input(0).img,
+            src=img,
             op=self.morph_type,
             kernel=np.ones((self.value_1,self.value_1),np.uint8),
         )
+    def get_state(self) -> dict:
+        return {
+            'val1': self.value_1
+
+        }
+
+    def set_state(self, data: dict, version):
+        self.value_1 = data['val1']
     
 class Morph_Gradient(Morphological_Base):
     title = 'Morphological Gradient'
     morph_type = cv2.MORPH_GRADIENT 
+    
 
 class Opening(Morphological_Base):
     title = 'Opening (Morph)'
@@ -2882,12 +4061,14 @@ class Threshold_Base(NodeBase2):        #Nodebase just a different colour
         self.SIGNALS.clr_img.connect(self.main_widget().clear_img)
         self.main_widget().previewState.connect(self.preview)
         self.main_widget().threshValueChanged.connect(self.ontValueChanged)
+        self.main_widget().threshValueChanged.connect(self.proc_stack_parallel)
         self.main_widget().mvValueChanged.connect(self.onMvvalueChanged)   
+        self.main_widget().mvValueChanged.connect(self.proc_stack_parallel)
         
         try:
-             self.new_img_wrp = CVImage(self.get_img())
+             self.new_img_wrp = CVImage(self.get_img(self.sliced))
              self.SIGNALS.new_img.emit(self.new_img_wrp.img)
-             self.set_output_val(0, self.new_img_wrp)
+            #  self.set_output_val(0, self.new_img_wrp)
         except:  # there might not be an image ready yet
             pass
         # when running in gui mode, the value might come from the input widget
@@ -2896,12 +4077,14 @@ class Threshold_Base(NodeBase2):        #Nodebase just a different colour
 
     #called when img connected - send output
     def update_event(self, inp=-1):  #called when an input is changed
-        self.new_img_wrp = CVImage(self.get_img())
+        self.handle_stack()
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 self.SIGNALS.new_img.emit(self.new_img_wrp.img)
 
-        self.set_output_val(0, self.new_img_wrp)
+        self.proc_stack_parallel()
+        self.set_output_val(0, (self.reshaped_proc_data, self.frame, self.z_sclice))
     
     def preview(self, state):
         if state ==  True:
@@ -2917,35 +4100,31 @@ class Threshold_Base(NodeBase2):        #Nodebase just a different colour
         # This method will be called whenever the widget's signal is emitted
         # print(value)
         self.thr = value
-        self.new_img_wrp = CVImage(self.get_img())
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 #update continuously 
                 self.SIGNALS.new_img.emit(self.new_img_wrp.img)
         else:
             self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
-      
-        self.set_output_val(0, self.new_img_wrp)
 
     def onMvvalueChanged(self, value):
         # This method will be called whenever the widget's signal is emitted
         self.mv = value
-        self.new_img_wrp = CVImage(self.get_img())
+        self.new_img_wrp = CVImage(self.get_img(self.sliced))
         if self.prev == True:
             if self.session.gui:
                 #update continuously 
                 self.SIGNALS.new_img.emit(self.new_img_wrp.img)
         else:
             self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
-      
-        self.set_output_val(0, self.new_img_wrp)
 
-    def get_img(self):
-        if len(self.input(0).img.shape) == 2:
+    def proc_technique(self,img):
+        if img.shape[-1] == 1:
                 # Grayscale image
-                img_gray = self.input(0).img
+                img_gray = img
         else:
-            img_gray = cv2.cvtColor(self.input(0).img, cv2.COLOR_BGR2GRAY)
+            img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         ret, result = cv2.threshold(
             src=img_gray,
             thresh=self.thr,
@@ -2953,15 +4132,16 @@ class Threshold_Base(NodeBase2):        #Nodebase just a different colour
             type=self.thresh_type,
         )
         return result    
-        
-    # #use when save and close
-    # def get_state(self) -> dict:
-    #     return {
-    #         'val': self.val,
-    #     }
+    
+    def get_state(self) -> dict:
+        return {
+            'val1': self.thr,
+            'val2': self.mv,
+        }
 
-    # def set_state(self, data: dict, version):
-    #     self.val = data['val']
+    def set_state(self, data: dict, version):
+        self.thr = data['val1']
+        self.mv = data['val2']
 
 class ThresholdBinary(Threshold_Base):
     title = 'Binary Threshold'
@@ -3521,6 +4701,214 @@ class BlurSimplePrev(OpenCVNodeBase):
 #This code just looks shorter because of OpenCVNodeBase
 
 
+#Experimenting new Data transfer
+class TransmitTuple(NodeBase):        #Nodebase just a different colour
+          #Nodebase just a different colour
+    title = 'TransmitTuple'
+    version = 'v0.1'
+    init_inputs = [
+        
+        NodeInputBP('input img'),
+         
+    ]
+    init_outputs = [
+        NodeOutputBP('output img'), #img
+
+    ]
+    main_widget_class = widgets.Tuple
+    main_widget_pos = 'below ports'
+
+    def __init__(self, params):
+        super().__init__(params)
+
+        if self.session.gui:
+            from qtpy.QtCore import QObject, Signal
+            class Signals(QObject):
+                #Signals used for preview
+                new_img = Signal(object)    #original
+                clr_img = Signal(object)    #added      
+        
+            # to send images to main_widget in gui mode
+            self.SIGNALS = Signals()
+
+        self.prev = True
+        self.kk = 5
+
+    def place_event(self):  
+        self.update()
+
+    def view_place_event(self):
+        # self.SIGNALS.new_img.connect(self.main_widget().show_image)
+        # self.SIGNALS.clr_img.connect(self.main_widget().clear_img)
+        self.main_widget().kValueChanged.connect(self.onSliderValueChanged)
+        # self.main_widget().previewState.connect(self.preview)
+        
+        try:
+            #  self.new_img_wrp = CVImage(self.get_img())
+            #  self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+             self.set_output_val(0, (self.kk, 5))
+        except:  # there might not be an image ready yet
+            pass
+        # when running in gui mode, the value might come from the input widget
+        # check
+        self.update()
+
+    #called when img connected - send output
+    def update_event(self, inp=-1):  #called when an input is changed
+        # self.new_img_wrp = CVImage(self.get_img())
+        # if self.prev == True:
+        #     if self.session.gui:
+        #         self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+
+        self.set_output_val(0, (self.kk, 5))
+    
+    def preview(self, state):
+        if state ==  True:
+            self.prev = True
+            #Bring image back immediately 
+            self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+               
+        else:
+              self.prev = False 
+              self.SIGNALS.clr_img.emit(self.new_img_wrp.img) 
+
+    def onSliderValueChanged(self, value):
+        # This method will be called whenever the widget's signal is emitted
+        # print(value)
+        self.kk = value
+        # self.new_img_wrp = CVImage(self.get_img())
+        # if self.prev == True:
+        #     if self.session.gui:
+        #         #update continuously 
+        #         self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        # else:
+        #     self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
+      
+        self.set_output_val(0, (self.kk, 5))
+        # print(self.outputs(0))
+    
+    def get_img(self):
+        #debug
+        # print(f"getimageValue{value}")
+        return cv2.blur(
+            src=self.input(0).img,
+            ksize=(self.kk,self.kk),
+                )
+        
+    # #use when save and close
+    # def get_state(self) -> dict:
+    #     return {
+    #         'val': self.val,
+    #     }
+
+    # def set_state(self, data: dict, version):
+    #     self.val = data['val']
+
+class TransmitTuple2(NodeBase):        #Nodebase just a different colour
+          #Nodebase just a different colour
+    title = 'TransmitTuple2'
+    version = 'v0.1'
+    init_inputs = [
+        
+        NodeInputBP('input img'),
+         
+    ]
+    init_outputs = [
+        NodeOutputBP('output img'), #img
+
+    ]
+    main_widget_class = widgets.Tuple
+    main_widget_pos = 'below ports'
+
+    def __init__(self, params):
+        super().__init__(params)
+
+        if self.session.gui:
+            from qtpy.QtCore import QObject, Signal
+            class Signals(QObject):
+                #Signals used for preview
+                new_img = Signal(object)    #original
+                clr_img = Signal(object)    #added      
+        
+            # to send images to main_widget in gui mode
+            self.SIGNALS = Signals()
+
+        self.prev = True
+        self.kk = 5
+
+    def place_event(self):  
+        self.update()
+
+    def view_place_event(self):
+        # self.SIGNALS.new_img.connect(self.main_widget().show_image)
+        # self.SIGNALS.clr_img.connect(self.main_widget().clear_img)
+        self.main_widget().kValueChanged.connect(self.onSliderValueChanged)
+        # self.main_widget().previewState.connect(self.preview)
+        
+        try:
+            #  self.new_img_wrp = CVImage(self.get_img())
+            #  self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+             self.set_output_val(0, (self.kk, 5))
+        except:  # there might not be an image ready yet
+            pass
+        # when running in gui mode, the value might come from the input widget
+        # check
+        self.update()
+
+    #called when img connected - send output
+    def update_event(self, inp=-1):  #called when an input is changed
+        # self.new_img_wrp = CVImage(self.get_img())
+        # if self.prev == True:
+        #     if self.session.gui:
+        #         self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        print("INPUT", self.input(0)[0])
+        self.set_output_val(0, (self.kk, 5))
+    
+    def preview(self, state):
+        if state ==  True:
+            self.prev = True
+            #Bring image back immediately 
+            self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+               
+        else:
+              self.prev = False 
+              self.SIGNALS.clr_img.emit(self.new_img_wrp.img) 
+
+    def onSliderValueChanged(self, value):
+        # This method will be called whenever the widget's signal is emitted
+        # print(value)
+        self.kk = value
+        # self.new_img_wrp = CVImage(self.get_img())
+        # if self.prev == True:
+        #     if self.session.gui:
+        #         #update continuously 
+        #         self.SIGNALS.new_img.emit(self.new_img_wrp.img)
+        # else:
+        #     self.SIGNALS.clr_img.emit(self.new_img_wrp.img)
+        new = self.kk*self.input(0)[0]
+        new2 = 5*self.input(0)[1]
+        self.set_output_val(0, (new, new2))
+        print(f"new{new}, new2{new2}")
+        # print(self.outputs(0))
+    
+    def get_img(self):
+        #debug
+        # print(f"getimageValue{value}")
+        return cv2.blur(
+            src=self.input(0).img,
+            ksize=(self.kk,self.kk),
+                )
+        
+    # #use when save and close
+    # def get_state(self) -> dict:
+    #     return {
+    #         'val': self.val,
+    #     }
+
+    # def set_state(self, data: dict, version):
+    #     self.val = data['val']
+
+
 nodes = [
     # Checkpoint_Node,
     # Button_Node,
@@ -3559,6 +4947,7 @@ nodes = [
     Blur_Averaging,
     Median_Blur,
     Gaussian_Blur,
+    Gaussian_Blur3D,
     Bilateral_Filtering,
     Dilation,
     Opening,
@@ -3571,5 +4960,7 @@ nodes = [
     ThresholdOtsu,
     ThresholdBinary,
     # Post Binatization 
+    TransmitTuple,
+    TransmitTuple2,
     
 ]
